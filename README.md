@@ -5,7 +5,7 @@
 ## Install
 
 ```bash
-go get github.com/tuyoo/migrationgen@latest
+go get github.com/Amasterr/go-migration@latest
 ```
 
 ## Usage
@@ -14,7 +14,7 @@ go get github.com/tuyoo/migrationgen@latest
 package main
 
 import (
-	"github.com/tuyoo/migrationgen"
+	migrationgen "github.com/Amasterr/go-migration"
 )
 
 func main() {
@@ -51,14 +51,14 @@ If this package is developed inside a monorepo, you can split and push it to its
 ```bash
 # from monorepo root
 git subtree split --prefix=pkg/migrationgen -b migrationgen-release
-git push git@github.com:tuyoo/migrationgen.git migrationgen-release:main
+git push git@github.com:Amasterr/go-migration.git migrationgen-release:main
 ```
 
 Then tag and push a release:
 
 ```bash
-git clone git@github.com:tuyoo/migrationgen.git
-cd migrationgen
+git clone git@github.com:Amasterr/go-migration.git
+cd go-migration
 git tag v0.1.0
 git push origin v0.1.0
 ```
