@@ -59,6 +59,6 @@ Then tag and push a release:
 ```bash
 git clone git@github.com:Amasterr/go-migration.git
 cd go-migration
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```

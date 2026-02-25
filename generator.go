@@ -551,11 +551,7 @@ func buildDiff(previous, current schemaState) ([]string, []string) {
 
 func diffTable(tableName string, prev, cur tableState) []migrationOp {
 	ops := make([]migrationOp, 0)
-	fkDropOps := make([]migrationOp, 0)
-	fkAddOps := make([]migrationOp, 0)
-	if prev.ForeignKeys != nil {
-		fkDropOps, fkAddOps = diffForeignKeys(tableName, prev.ForeignKeys, cur.ForeignKeys)
-	}
+	fkDropOps, fkAddOps := diffForeignKeys(tableName, prev.ForeignKeys, cur.ForeignKeys)
 	ops = append(ops, fkDropOps...)
 
 	prevCols := sortedKeys(prev.Columns)

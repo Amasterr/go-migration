@@ -371,6 +371,53 @@ func TestDiffTableWithColumnAndIndexChanges(t *testing.T) {
 	}
 }
 
+func TestDiffTableAddsForeignKeyWhenPreviousHadNone(t *testing.T) {
+	prev := tableState{
+		Columns: map[string]columnState{
+			"id":         {Definition: "bigint unsigned"},
+			"creator_id": {Definition: "bigint unsigned"},
+		},
+		PrimaryKeys: []string{"id"},
+	}
+	cur := tableState{
+		Columns: map[string]columnState{
+			"id":         {Definition: "bigint unsigned"},
+			"creator_id": {Definition: "bigint unsigned"},
+		},
+		PrimaryKeys: []string{"id"},
+		ForeignKeys: map[string]foreignKeyState{
+			"fk_demo_creator": {
+				Columns:    []string{"creator_id"},
+				RefTable:   "creators",
+				RefColumns: []string{"id"},
+				OnDelete:   "SET NULL",
+				OnUpdate:   "CASCADE",
+			},
+		},
+	}
+
+	ops := diffTable("demo", prev, cur)
+	if len(ops) == 0 {
+		t.Fatalf("expected at least one operation when adding first foreign key")
+	}
+
+	found := false
+	for _, op := range ops {
+		if strings.Contains(op.up, "ADD CONSTRAINT `fk_demo_creator`") &&
+			strings.Contains(op.up, "FOREIGN KEY (`creator_id`) REFERENCES `creators` (`id`)") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		up := make([]string, 0, len(ops))
+		for _, op := range ops {
+			up = append(up, op.up)
+		}
+		t.Fatalf("expected foreign key add SQL not found, got: %v", up)
+	}
+}
+
 func TestBuildDiffDropTableRestoresForeignKeysOnDown(t *testing.T) {
 	prev := schemaState{
 		Tables: map[string]tableState{
