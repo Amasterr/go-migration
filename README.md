@@ -14,7 +14,7 @@ go get github.com/Amasterr/go-migration@latest
 package main
 
 import (
-	migrationgen "github.com/Amasterr/go-migration"
+	gomigration "github.com/Amasterr/go-migration"
 )
 
 func main() {
@@ -24,14 +24,14 @@ func main() {
 	}
 
 	// Sync snapshot only (no SQL files generated)
-	statePath, err := migrationgen.SyncSchemaState(models, "./database/migrations/main", "")
+	statePath, err := gomigration.SyncSchemaState(models, "./database/migrations/main", "")
 	if err != nil {
 		panic(err)
 	}
 	_ = statePath
 
 	// Generate migration SQL from snapshot diff
-	result, err := migrationgen.MakeMigrations(models, "./database/migrations/main", "add_order_index", "")
+	result, err := gomigration.MakeMigrations(models, "./database/migrations/main", "add_order_index", "")
 	if err != nil {
 		panic(err)
 	}

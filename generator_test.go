@@ -1,4 +1,4 @@
-package migrationgen
+package gomigration
 
 import (
 	"os"
