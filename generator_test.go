@@ -60,6 +60,32 @@ type compositeIndexInvalidModel struct {
 
 func (compositeIndexInvalidModel) TableName() string { return "composite_index_invalid_models" }
 
+type e2eUserWithJoin struct {
+	ID     uint                `gorm:"primaryKey"`
+	Groups []*e2eGroupWithJoin `gorm:"many2many:e2e_user_groups;"`
+}
+
+func (e2eUserWithJoin) TableName() string { return "e2e_users" }
+
+type e2eGroupWithJoin struct {
+	ID    uint               `gorm:"primaryKey"`
+	Users []*e2eUserWithJoin `gorm:"many2many:e2e_user_groups;"`
+}
+
+func (e2eGroupWithJoin) TableName() string { return "e2e_groups" }
+
+type e2eUserNoJoin struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (e2eUserNoJoin) TableName() string { return "e2e_users" }
+
+type e2eGroupNoJoin struct {
+	ID uint `gorm:"primaryKey"`
+}
+
+func (e2eGroupNoJoin) TableName() string { return "e2e_groups" }
+
 func migrationModels() []any {
 	return []any{
 		&relationUser{},
@@ -418,6 +444,207 @@ func TestDiffTableAddsForeignKeyWhenPreviousHadNone(t *testing.T) {
 	}
 }
 
+func TestBuildDiffCoversAllSchemaChangeTypes(t *testing.T) {
+	base := func() tableState {
+		return tableState{
+			Columns: map[string]columnState{
+				"id": {Definition: "bigint unsigned AUTO_INCREMENT"},
+			},
+			PrimaryKeys: []string{"id"},
+		}
+	}
+
+	prev := schemaState{
+		Tables: map[string]tableState{
+			"profiles":        base(),
+			"legacy_profiles": base(),
+			"users":           base(),
+			"parents":         base(),
+			"alpha": {
+				Columns: map[string]columnState{
+					"id":                {Definition: "bigint unsigned AUTO_INCREMENT"},
+					"profile_id":        {Definition: "bigint unsigned"},
+					"legacy_profile_id": {Definition: "bigint unsigned"},
+					"creator_id":        {Definition: "bigint unsigned"},
+					"name":              {Definition: "varchar(32)"},
+					"old_flag":          {Definition: "tinyint unsigned DEFAULT 0"},
+				},
+				Indexes: map[string]indexState{
+					"idx_alpha_old_flag": {Fields: []indexFieldState{{Column: "old_flag"}}},
+					"idx_alpha_mut":      {Fields: []indexFieldState{{Column: "profile_id"}}},
+				},
+				ForeignKeys: map[string]foreignKeyState{
+					"fk_alpha_profile": {
+						Columns:    []string{"profile_id"},
+						RefTable:   "profiles",
+						RefColumns: []string{"id"},
+						OnDelete:   "SET NULL",
+						OnUpdate:   "CASCADE",
+					},
+					"fk_alpha_legacy": {
+						Columns:    []string{"legacy_profile_id"},
+						RefTable:   "legacy_profiles",
+						RefColumns: []string{"id"},
+						OnDelete:   "CASCADE",
+						OnUpdate:   "CASCADE",
+					},
+				},
+				PrimaryKeys: []string{"id"},
+			},
+			"obsolete_links": {
+				Columns: map[string]columnState{
+					"id":        {Definition: "bigint unsigned AUTO_INCREMENT"},
+					"parent_id": {Definition: "bigint unsigned"},
+				},
+				ForeignKeys: map[string]foreignKeyState{
+					"fk_obsolete_links_parent": {
+						Columns:    []string{"parent_id"},
+						RefTable:   "parents",
+						RefColumns: []string{"id"},
+						OnDelete:   "CASCADE",
+					},
+				},
+				PrimaryKeys: []string{"id"},
+			},
+		},
+	}
+
+	cur := schemaState{
+		Tables: map[string]tableState{
+			"profiles":        base(),
+			"legacy_profiles": base(),
+			"users":           base(),
+			"parents":         base(),
+			"alpha": {
+				Columns: map[string]columnState{
+					"id":         {Definition: "bigint unsigned AUTO_INCREMENT"},
+					"profile_id": {Definition: "bigint unsigned"},
+					"creator_id": {Definition: "bigint unsigned"},
+					"name":       {Definition: "varchar(128)"},
+					"status":     {Definition: "tinyint unsigned DEFAULT 1"},
+				},
+				Indexes: map[string]indexState{
+					"idx_alpha_status": {Fields: []indexFieldState{{Column: "status"}}},
+					"idx_alpha_mut":    {Class: "UNIQUE", Fields: []indexFieldState{{Column: "profile_id"}}},
+				},
+				ForeignKeys: map[string]foreignKeyState{
+					"fk_alpha_profile": {
+						Columns:    []string{"profile_id"},
+						RefTable:   "profiles",
+						RefColumns: []string{"id"},
+						OnDelete:   "CASCADE",
+						OnUpdate:   "CASCADE",
+					},
+					"fk_alpha_creator": {
+						Columns:    []string{"creator_id"},
+						RefTable:   "users",
+						RefColumns: []string{"id"},
+						OnDelete:   "SET NULL",
+						OnUpdate:   "CASCADE",
+					},
+				},
+				PrimaryKeys: []string{"id"},
+			},
+			"beta_links": {
+				Columns: map[string]columnState{
+					"id":       {Definition: "bigint unsigned AUTO_INCREMENT"},
+					"alpha_id": {Definition: "bigint unsigned"},
+				},
+				Indexes: map[string]indexState{
+					"idx_beta_links_alpha": {Fields: []indexFieldState{{Column: "alpha_id"}}},
+				},
+				ForeignKeys: map[string]foreignKeyState{
+					"fk_beta_links_alpha": {
+						Columns:    []string{"alpha_id"},
+						RefTable:   "alpha",
+						RefColumns: []string{"id"},
+						OnDelete:   "CASCADE",
+						OnUpdate:   "CASCADE",
+					},
+				},
+				PrimaryKeys: []string{"id"},
+			},
+		},
+	}
+
+	up, down := buildDiff(prev, cur)
+	upJoined := strings.Join(up, "\n")
+	downJoined := strings.Join(down, "\n")
+
+	assertContainsAll(t, upJoined, []string{
+		"CREATE TABLE `beta_links`",
+		"DROP TABLE IF EXISTS `obsolete_links`;",
+		"ALTER TABLE `alpha` ADD COLUMN `status` tinyint unsigned DEFAULT 1;",
+		"ALTER TABLE `alpha` DROP COLUMN `legacy_profile_id`;",
+		"ALTER TABLE `alpha` MODIFY COLUMN `name` varchar(128);",
+		"CREATE INDEX `idx_alpha_status` ON `alpha` (`status`);",
+		"DROP INDEX `idx_alpha_old_flag` ON `alpha`;",
+		"DROP INDEX `idx_alpha_mut` ON `alpha`;",
+		"CREATE UNIQUE INDEX `idx_alpha_mut` ON `alpha` (`profile_id`);",
+		"ALTER TABLE `alpha` DROP FOREIGN KEY `fk_alpha_legacy`;",
+		"ALTER TABLE `alpha` DROP FOREIGN KEY `fk_alpha_profile`;",
+		"ALTER TABLE `alpha` ADD CONSTRAINT `fk_alpha_profile` FOREIGN KEY (`profile_id`) REFERENCES `profiles` (`id`) ON DELETE CASCADE ON UPDATE CASCADE;",
+		"ALTER TABLE `alpha` ADD CONSTRAINT `fk_alpha_creator` FOREIGN KEY (`creator_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE;",
+		"ALTER TABLE `beta_links` ADD CONSTRAINT `fk_beta_links_alpha` FOREIGN KEY (`alpha_id`) REFERENCES `alpha` (`id`) ON DELETE CASCADE ON UPDATE CASCADE;",
+	})
+
+	assertContainsAll(t, downJoined, []string{
+		"ALTER TABLE `beta_links` DROP FOREIGN KEY `fk_beta_links_alpha`;",
+		"DROP TABLE IF EXISTS `beta_links`;",
+		"CREATE TABLE `obsolete_links`",
+		"ALTER TABLE `obsolete_links` ADD CONSTRAINT `fk_obsolete_links_parent` FOREIGN KEY (`parent_id`) REFERENCES `parents` (`id`) ON DELETE CASCADE;",
+		"ALTER TABLE `alpha` DROP FOREIGN KEY `fk_alpha_creator`;",
+		"ALTER TABLE `alpha` DROP FOREIGN KEY `fk_alpha_profile`;",
+		"ALTER TABLE `alpha` ADD CONSTRAINT `fk_alpha_profile` FOREIGN KEY (`profile_id`) REFERENCES `profiles` (`id`) ON DELETE SET NULL ON UPDATE CASCADE;",
+		"ALTER TABLE `alpha` ADD CONSTRAINT `fk_alpha_legacy` FOREIGN KEY (`legacy_profile_id`) REFERENCES `legacy_profiles` (`id`) ON DELETE CASCADE ON UPDATE CASCADE;",
+		"DROP INDEX `idx_alpha_status` ON `alpha`;",
+		"CREATE INDEX `idx_alpha_old_flag` ON `alpha` (`old_flag`);",
+		"DROP INDEX `idx_alpha_mut` ON `alpha`;",
+		"CREATE INDEX `idx_alpha_mut` ON `alpha` (`profile_id`);",
+		"ALTER TABLE `alpha` DROP COLUMN `status`;",
+		"ALTER TABLE `alpha` ADD COLUMN `legacy_profile_id` bigint unsigned;",
+		"ALTER TABLE `alpha` MODIFY COLUMN `name` varchar(32);",
+	})
+}
+
+func TestBuildDiffMany2ManyRelationCreateAndDrop(t *testing.T) {
+	withoutJoin, err := buildCurrentState([]any{&e2eUserNoJoin{}, &e2eGroupNoJoin{}})
+	if err != nil {
+		t.Fatalf("buildCurrentState without join failed: %v", err)
+	}
+	withJoin, err := buildCurrentState([]any{&e2eUserWithJoin{}, &e2eGroupWithJoin{}})
+	if err != nil {
+		t.Fatalf("buildCurrentState with join failed: %v", err)
+	}
+
+	upCreate, downCreate := buildDiff(withoutJoin, withJoin)
+	upCreateJoined := strings.Join(upCreate, "\n")
+	downCreateJoined := strings.Join(downCreate, "\n")
+
+	assertContainsAll(t, upCreateJoined, []string{
+		"CREATE TABLE `e2e_user_groups`",
+		"REFERENCES `e2e_users` (`id`)",
+		"REFERENCES `e2e_groups` (`id`)",
+	})
+	assertContainsAll(t, downCreateJoined, []string{
+		"DROP FOREIGN KEY",
+		"DROP TABLE IF EXISTS `e2e_user_groups`;",
+	})
+
+	upDrop, downDrop := buildDiff(withJoin, withoutJoin)
+	upDropJoined := strings.Join(upDrop, "\n")
+	downDropJoined := strings.Join(downDrop, "\n")
+
+	assertContainsAll(t, upDropJoined, []string{
+		"DROP TABLE IF EXISTS `e2e_user_groups`;",
+	})
+	assertContainsAll(t, downDropJoined, []string{
+		"CREATE TABLE `e2e_user_groups`",
+		"REFERENCES `e2e_users` (`id`)",
+		"REFERENCES `e2e_groups` (`id`)",
+	})
+}
+
 func TestBuildDiffDropTableRestoresForeignKeysOnDown(t *testing.T) {
 	prev := schemaState{
 		Tables: map[string]tableState{
@@ -601,6 +828,16 @@ func TestRunMakeMigrationsCreatesSQLFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".schema_state.json")); err != nil {
 		t.Fatalf("expected schema state file created, got: %v", err)
+	}
+}
+
+func assertContainsAll(t *testing.T, sql string, fragments []string) {
+	t.Helper()
+	for _, fragment := range fragments {
+		if strings.Contains(sql, fragment) {
+			continue
+		}
+		t.Fatalf("expected SQL fragment not found: %s\nall SQL:\n%s", fragment, sql)
 	}
 }
 
